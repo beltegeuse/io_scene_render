@@ -105,19 +105,42 @@ def export_camera(data_all, scene):
         data_all["camera"] = camera_dict
 
 
-def texture_or_value (inputSlot, scene):
+def texture_or_value (inputSlot, scene, scale=1.0):
     """Return BSDF information"""
-    links = inputSlot.links
-    print('Number of links: ')
-    print(len(links))
-    for x in inputSlot.links:
+    if(len(inputSlot.links) == 0):
+        # TODO: Pas de alpha
+        print("No link, use value directly")
+        return {
+            "type" : "constant",
+            "value" : [inputSlot.default_value[0] * scale, 
+                       inputSlot.default_value[1] * scale, 
+                       inputSlot.default_value[2] * scale]
+        }
+    
+    print(f"Number links: {len(inputSlot.links)}")
+    node = inputSlot.links[0].from_node # Take always the first link
+
+    print(f"Texture type: {node.bl_idname}")
+    if node.bl_idname == "ShaderNodeTexChecker":
+        print("Detect checkerboard texture")
+        # Checker board
+        c1 = node.inputs[1].default_value
+        c2 = node.inputs[2].default_value
+        scale = node.inputs[3].default_value
+        return {
+            "color1" : [c1[0], c1[1], c1[2]],
+            "color2" : [c2[0], c2[1], c2[2]],
+            "scale" : [scale / 2, scale / 2],
+            "type" : "checkerboard"
+        }
+    elif node.bl_idname == "ShaderNodeTexImage":
         print("Checking input named: " + inputSlot.name)
-        fromFile = bpy.path.abspath(x.from_node.image.filepath)
+        fromFile = bpy.path.abspath(node.image.filepath)
         head, tail = os.path.split(fromFile)
 
         print("Has a image named:" + tail)
-        print("at path: " + bpy.path.abspath(x.from_node.image.filepath))
-        print("going to type node:" + x.from_node.type)
+        print("at path: " + bpy.path.abspath(node.image.filepath))
+        print("going to type node:" + node.type)
         
         toFile = bpy.path.abspath(scene.exportpath + 'textures/' + tail)
         print("from file:")
@@ -128,11 +151,24 @@ def texture_or_value (inputSlot, scene):
             shutil.copyfile(os.path.realpath(fromFile), os.path.realpath(toFile))
         else:
             print("Texture source, and destination are the same, skipping copying.")
+    
+        return {
+            "type" : "texture",
+            "filename" : "textures/"+node.image.name,
+            "scale" : scale
+        }
+    else:
+        print("WARN: Unsupported node export")
+        return {
+            "type" : "constant",
+            "value" : [inputSlot.default_value[0] * scale, 
+                       inputSlot.default_value[1] * scale, 
+                       inputSlot.default_value[2] * scale]
+        }
         
-        return "textures/"+x.from_node.image.name
-    # TODO: Pas de alpha
-    return [inputSlot.default_value[0], inputSlot.default_value[1], inputSlot.default_value[2]]
 
+    
+    
 def getTextureInSlotName(textureSlotParam):
     srcfile = textureSlotParam
     head, tail = os.path.split(srcfile)
@@ -149,7 +185,15 @@ def export_material_node(mat, materialName, scene):
         mat_data["albedo"] = texture_or_value(mat.inputs[0], scene)
     elif mat.bl_idname == "ShaderNodeEmission":
         mat_data["type"] = "diffuse_light"
-        mat_data["radiance"] = texture_or_value(mat.inputs[0], scene)
+        scale = mat.inputs[1].default_value
+        mat_data["radiance"] = texture_or_value(mat.inputs[0], scene, scale)
+    elif mat.bl_idname == "ShaderNodeBsdfGlass":
+        mat_data["type"] = "dielectric"
+        # TODO: Export IOR (texture - 1d)
+    elif mat.bl_idname == "ShaderNodeBsdfGlossy":
+        mat_data["type"] = "metal"
+        mat_data["ks"] = texture_or_value(mat.inputs[0], scene)
+        mat_data["roughness"] = mat.inputs[1].default_value
     else:
         print(f"WARN: Wrong material: {materialName} | type: {mat.bl_idname}")
         mat_data["type"] = "diffuse"
