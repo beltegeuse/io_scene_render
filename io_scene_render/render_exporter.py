@@ -244,14 +244,6 @@ def export_gometry_as_obj(data_all, scene, frameNumber):
             mesh.calc_normals_split()
 
             for i in range(max(len(object.material_slots), 1)):
-                if len(object.material_slots) != 0:
-                    material = object.material_slots[i].material
-                    if material.name not in exportedMaterials:
-                        export_material(data_all, material, scene)
-                        exportedMaterials.append(material.name)
-                else:
-                    pass # TODO: Not material
-                
                 # Export the mesh
                 indices = []
                 normals = []
@@ -263,6 +255,16 @@ def export_gometry_as_obj(data_all, scene, frameNumber):
                             indices.append(vertex_index)
                             normals.append(mesh.loops[loop_index].normal)
                 print("Nb Tri: ", len(indices) // 3) 
+                if(len(indices) == 0):
+                    continue 
+                
+                if len(object.material_slots) != 0:
+                    material = object.material_slots[i].material
+                    if material.name not in exportedMaterials:
+                        export_material(data_all, material, scene)
+                        exportedMaterials.append(material.name)
+                else:
+                    pass # TODO: Not material
             
                 # Create ouput directory
                 objFolderPath =  bpy.path.abspath(scene.exportpath + 'meshes/' + frameNumber + '/')
