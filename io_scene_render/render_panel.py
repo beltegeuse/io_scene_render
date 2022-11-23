@@ -76,18 +76,14 @@ class RendererRenderSettingsPanel(bpy.types.Panel):
         layout.label(text="Integrator settings:")
         row = layout.row()
 
-        row.prop(scene,"integrators")
-
-        if scene.integrators == 'path':
-            row = layout.row()
-            row.prop(scene,"path_integrator_max_depth")
-
-        if scene.integrators == 'direct':
-            pass
-        
-        if scene.integrators == 'normal':
-            pass
-        
+        # row.prop(scene,"integrators")
+        # if scene.integrators == 'path':
+        #     row = layout.row()
+        #     row.prop(scene,"path_integrator_max_depth")
+        # if scene.integrators == 'direct':
+        #     pass
+        # if scene.integrators == 'normal':
+        #     pass
         layout.label(text="Export:")
         row = layout.row()
         layout.operator("scene.export", icon='MESH_CUBE', text="Export scene")

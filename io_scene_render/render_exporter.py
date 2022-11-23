@@ -81,7 +81,7 @@ def export_camera(data_all, scene):
 
         # https://blender.stackexchange.com/questions/14745/how-do-i-change-the-focal-length-of-a-camera-with-python
         fov = bpy.data.cameras[0].angle * 180 / math.pi
-        camera_dict["vfov"] = fov
+        camera_dict["vfov"] = fov * (scene.resolution_y/scene.resolution_x)
         
         if scene.dofLookAt is not None:
             camera_dict["fdist"] = measure(cam_ob.matrix_world.translation, scene.dofLookAt.matrix_world.translation)
@@ -318,8 +318,10 @@ def export_gometry_as_obj(data_all, scene, frameNumber):
                     os.makedirs(objFolderPath)
 
                 # Compute the path variables
-                objFilePath = objFolderPath + object.name + f'_mat{i}.obj' 
-                objFilePathRel = 'meshes/' + frameNumber + '/' + object.name + f'_mat{i}.obj'
+                objName = object.name + f'_mat{i}.obj' 
+                objName = objName.replace(":","_")
+                objFilePath = objFolderPath + objName
+                objFilePathRel = 'meshes/' + frameNumber + '/' + objName
 
                 # Export obj manually
                 write_obj(objFilePath, mesh, indices, normals, i)
