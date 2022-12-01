@@ -152,11 +152,36 @@ def texture_or_value (inputSlot, scene, scale=1.0):
         else:
             print("Texture source, and destination are the same, skipping copying.")
     
-        return {
-            "type" : "texture",
-            "filename" : "textures/"+node.image.name,
-            "scale" : scale
-        }
+        nodeLinkCount = len(node.inputs[0].links)
+        if nodeLinkCount > 0:
+            print(f"Number links For Mapping: {len(node.inputs[0].links)}")
+
+            # TODO: Assume mapping node for texture manipulation
+            nodeMapping = node.inputs[0].links[0].from_node
+            scale = nodeMapping.inputs[3].default_value
+            t = nodeMapping.inputs[1].default_value
+            r = nodeMapping.inputs[2].default_value #  order='XYZ'
+
+            translate = [t[0],t[1],t[2]]
+            scaleXYZ = [scale[0],scale[1],scale[2]]
+            rot_angles = [r[0],r[1],r[2]]
+            rot_anglesDegree = [math.degrees(r[0]) ,math.degrees(r[1]),math.degrees(r[2])]
+            
+            return {
+                "type" : "texture",
+                "filename" : "textures/"+node.image.name,
+                "scale" : scaleXYZ,
+                "translate" : translate,
+                "rotation" : rot_angles,
+                "rotationDegree" : rot_anglesDegree
+            }
+        else:
+            # Default export
+            return {
+                "type" : "texture",
+                "filename" : "textures/"+node.image.name,
+                "scale" : scale
+            }
     else:
         print("WARN: Unsupported node export")
         return {
