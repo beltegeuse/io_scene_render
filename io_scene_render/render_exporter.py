@@ -214,6 +214,9 @@ def export_material_node(mat, materialName, scene):
         mat_data["radiance"] = texture_or_value(mat.inputs[0], scene, scale)
     elif mat.bl_idname == "ShaderNodeBsdfGlass":
         mat_data["type"] = "dielectric"
+        mat_data["ks"] = texture_or_value(mat.inputs[0], scene) # Color
+        mat_data["roughness"] = mat.inputs[1].default_value     # Roughness
+        mat_data["eta_int"] = mat.inputs[2].default_value       # IOR
         # TODO: Export IOR (texture - 1d)
     elif mat.bl_idname == "ShaderNodeBsdfGlossy":
         mat_data["type"] = "metal"
