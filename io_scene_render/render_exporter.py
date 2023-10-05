@@ -396,6 +396,17 @@ def export_integrator(scene):
         int_data["type"] = "path" # Default
     return int_data
 
+def export_world(data_all, scene):
+    # Fetch world
+    # outputNode = None
+    # for n in scene.world.node_tree.nodes:
+    #     if n.type == 'OUTPUT_WORLD':
+    #         outputNode = n
+    #         break
+    # outputNode.inputs[0]
+    
+    pass
+
 def export_renderer(filepath, scene , frameNumber):
     out = os.path.join(filepath, "test" + frameNumber +".json")
     if not os.path.exists(filepath):
@@ -407,7 +418,9 @@ def export_renderer(filepath, scene , frameNumber):
 
     with open(out, 'w') as scene_file:
         data_all ={}
-        # data_all["background"] = [1, 1, 1] # Main configuration?
+        
+        export_world(data_all,scene)
+        
         data_all["materials"]=[]
         data_all["shapes"]=[]
 
