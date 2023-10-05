@@ -154,37 +154,39 @@ def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
             "filename" : "textures/"+node.image.name,
         }
     elif node.bl_idname == "ShaderNodeTexImage":
-        print("INFO: Detect Texture image") 
+        filename = os.path.split(node.image.filepath.replace("\\","//"))[1]
+        print(f"INFO: Detect Texture image: {node.image.name} | {filename}") 
         texture_copy(node, filepath)
         if len(node.inputs[0].links) > 0:
             print(f"INFO: Number links For Texture mapping: {len(node.inputs[0].links)}")
 
             # TODO: Assume mapping node for texture manipulation
-            nodeMapping = node.inputs[0].links[0].from_node
-            scale = nodeMapping.inputs[3].default_value
-            t = nodeMapping.inputs[1].default_value
-            r = nodeMapping.inputs[2].default_value #  order='XYZ'
+            # TODO: Fix this later
 
-            translate = [t[0],t[1],t[2]]
-            scaleXYZ = [scale[0],scale[1],scale[2]]
-            rot_angles = [r[0],r[1],r[2]]
-            rot_anglesDegree = [math.degrees(r[0]) ,math.degrees(r[1]),math.degrees(r[2])]
+            # nodeMapping = node.inputs[0].links[0].from_node
+            # scale = nodeMapping.inputs[3].default_value
+            # t = nodeMapping.inputs[1].default_value
+            # r = nodeMapping.inputs[2].default_value #  order='XYZ'
+            # translate = [t[0],t[1],t[2]]
+            # scaleXYZ = [scale[0],scale[1],scale[2]]
+            # rot_angles = [r[0],r[1],r[2]]
+            # rot_anglesDegree = [math.degrees(r[0]) ,math.degrees(r[1]),math.degrees(r[2])]
             
             # TODO: Might not be standard mapping
             return {
                 "type" : "texture",
-                "filename" : "textures/"+node.image.name,
-                "scale" : scaleXYZ,
-                "translate" : translate,
-                "rotation" : rot_angles,
-                "rotationDegree" : rot_anglesDegree,
+                "filename" : "textures/"+filename,
+                # "scale" : scaleXYZ,
+                # "translate" : translate,
+                # "rotation" : rot_angles,
+                # "rotationDegree" : rot_anglesDegree,
                 "gamma" : not is_normal_map,
             }
         else:
             # Default export
             return {
                 "type" : "texture",
-                "filename" : "textures/"+node.image.name,
+                "filename" : "textures/"+filename,
                 "gamma" : not is_normal_map,
                 "scale" : scale
             }
