@@ -9,13 +9,9 @@ class ExportRendererScene(bpy.types.Operator):
     COMPAT_ENGINES = {'Renderer_Renderer'}
     
     def execute(self, context):
-        print("Starting calling mitsuba_export")
+        # Get the scene and abs path (if provided)
         currentScene = bpy.context.scene
-        print ("Current selected scene : " + currentScene.name)
-        print("Scene output path:")
         exportPath = bpy.path.abspath(currentScene.exportpath)
-        print(exportPath)
-
         for frameNumber in range(currentScene.batch_frame_start, currentScene.batch_frame_end +1):
             currentScene.frame_set(frameNumber)
             print("Exporting frame: %s" % (frameNumber))

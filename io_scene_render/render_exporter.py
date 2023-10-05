@@ -52,12 +52,12 @@ def measure(first, second):
     distance = sqrt((locx)**2 + (locy)**2 + (locz)**2)
     return distance
 
-def export_camera(data_all, scene):
+def export_camera(scene):
     print("INFO: Fetching camera..")
     cam_ob = bpy.context.scene.camera
     if cam_ob is None:
         print("ERROR: no scene camera,aborting")
-        self.report({'ERROR'}, "No camera in scene, aborting")
+        return {}
     elif cam_ob.type == 'CAMERA':
         print(f"Exporting camera: {cam_ob.name} [{scene.render.resolution_x}x{scene.render.resolution_y}]")
 
@@ -87,20 +87,16 @@ def export_camera(data_all, scene):
         else:
             camera_dict["fdist"] = 1.0
 
-
-        #Write out the sampler for the image.
-        data_all["sampler"] = {
-            "type" : "independent",
-            "samples" : scene.spp
-        }
-
         camera_dict["transform"] = {
             "from" : [from_point.x, from_point.y, from_point.z],
             "at" : [at_point.x, at_point.y, at_point.z],
             "up" : [up_point[0],up_point[1],up_point[2]]
         }
 
-        data_all["camera"] = camera_dict
+        return (camera_dict, {
+            "type" : "independent",
+            "samples" : scene.spp
+        })
         
 def texture_might_exist(inputSlot):
     return len(inputSlot.links) > 0
@@ -241,10 +237,10 @@ def export_material_node(mat, materialName, scene):
     mat_data["name"] = materialName
     return mat_data
 
-def export_material(data_all, material, scene):
+def export_material(material, scene):
     if material is None:
         print("WARN: no material on object")
-
+    mats = []
     print (f'INFO: Exporting material named: {material.name}')
     currentMaterial = None
     material.use_nodes = True
@@ -254,15 +250,8 @@ def export_material(data_all, material, scene):
                 for input in node.inputs:
                     for node_links in input.links:
                         currentMaterial =  node_links.from_node
-                        data_all["materials"].append(export_material_node(currentMaterial, material.name, scene))
-
-def createDefaultExportDirectories(scene):
-    texturePath = bpy.path.abspath(scene.exportpath + 'textures')
-    print(f"INFO: Exporting textures to: {texturePath}")
-
-    if not os.path.exists(texturePath):
-        print(f'INFO: Texture directory did not exist, creating: {texturePath}')
-        os.makedirs(texturePath)
+                        mats += [export_material_node(currentMaterial, material.name, scene)]
+    return mats
 
 def write_obj(file, mesh, indices, normals, i):
     # Pack U,V
@@ -301,7 +290,12 @@ def write_obj(file, mesh, indices, normals, i):
         else:
            out.write(f'f {i+1}//{i+1} {i+2}//{i+2} {i+3}//{i+3}\n')
 
-def export_gometry_as_obj(data_all, scene, frameNumber):
+def export_objects(filepath, scene, frameNumber):
+    materials = [
+        {"type" : "diffuse", "name" : "DEFAULT", "albedo" : [0.8, 0.8, 0.8]}
+    ]
+    shapes = []
+
     objects = scene.objects
     for object in objects:
         print(f"INFO: Exporting Object: {object.name}")
@@ -335,16 +329,16 @@ def export_gometry_as_obj(data_all, scene, frameNumber):
                 if(len(indices) == 0):
                     continue 
                 
+                # Export the material if needed
                 if len(object.material_slots) != 0:
                     material = object.material_slots[i].material
                     if material.name not in exportedMaterials:
-                        export_material(data_all, material, scene)
+                        materials += export_material(material, scene)
                         exportedMaterials.append(material.name)
-                else:
-                    pass # TODO: Not material
+                    
             
                 # Create ouput directory
-                objFolderPath =  bpy.path.abspath(scene.exportpath + 'meshes/' + frameNumber + '/')
+                objFolderPath =  bpy.path.abspath(filepath + './meshes/' + frameNumber + '/')
                 if not os.path.exists(objFolderPath):
                     print(f'Meshes directory did not exist, creating: {objFolderPath}')
                     os.makedirs(objFolderPath)
@@ -366,6 +360,9 @@ def export_gometry_as_obj(data_all, scene, frameNumber):
                 shape_data["filename"] = objFilePathRel
                 if len(object.material_slots) != 0:
                     shape_data["material"] = object.material_slots[i].material.name
+                else:
+                    # Use the default material
+                    shape_data["material"] = "DEFAULT"
                 
                 matrix =  object.matrix_world # transposed()
                 shape_data["transform"] = {
@@ -376,10 +373,9 @@ def export_gometry_as_obj(data_all, scene, frameNumber):
                         matrix[3][0],matrix[3][1],matrix[3][2],matrix[3][3]
                     ]
                 }                
-                data_all["shapes"].append(shape_data)
+                shapes += [shape_data]
 
-
-    return ''
+    return (shapes, materials)
             
 
 def export_integrator(scene):
@@ -396,7 +392,7 @@ def export_integrator(scene):
         int_data["type"] = "path" # Default
     return int_data
 
-def export_world(data_all, scene):
+def export_background(scene):
     # Fetch world
     # outputNode = None
     # for n in scene.world.node_tree.nodes:
@@ -404,14 +400,25 @@ def export_world(data_all, scene):
     #         outputNode = n
     #         break
     # outputNode.inputs[0]
-    
-    pass
+    return 0.0
 
 def export_renderer(filepath, scene , frameNumber):
+    if filepath == "":
+        filepath = os.path.dirname(bpy.data.filepath)
+        print(f"WARN: No output directory, using default: {filepath}")
+    else:
+        print(f"INFO: Exporting to: {filepath}")
+
+    # Create output directory
     out = os.path.join(filepath, "test" + frameNumber +".json")
     if not os.path.exists(filepath):
         print(f'INFO: Output directory did not exist, creating: {filepath}')
         os.makedirs(filepath)
+
+    # Create texture directory
+    if not os.path.exists(filepath + "/textures"):
+        print(f'INFO: Texture directory did not exist, creating: {filepath + "/textures"}')
+        os.makedirs(filepath + "/textures")
     
     # Clear lsit of cached texture and materials
     exportedMaterials.clear()
@@ -419,16 +426,15 @@ def export_renderer(filepath, scene , frameNumber):
     with open(out, 'w') as scene_file:
         data_all ={}
         
-        export_world(data_all,scene)
-        
-        data_all["materials"]=[]
-        data_all["shapes"]=[]
-
-        createDefaultExportDirectories(scene)
+        data_all["background"] = export_background(scene)
         data_all["integrator"] = export_integrator(scene)
-        export_camera(data_all, scene)
-        export_gometry_as_obj(data_all,scene, frameNumber)
-        
+        (camera, sampler) = export_camera(scene)
+        data_all["camera"] = camera
+        data_all["sampler"] = sampler
+        (shapes, materials) = export_objects(filepath, scene, frameNumber)
+        data_all["shapes"] = shapes
+        data_all["materials"] = materials
+
         exported_json_string = json.dumps(data_all, indent=4)
         scene_file.write(exported_json_string)
         scene_file.close()
