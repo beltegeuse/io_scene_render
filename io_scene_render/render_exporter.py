@@ -144,8 +144,8 @@ def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
         return {
             "color1" : [c1[0], c1[1], c1[2]],
             "color2" : [c2[0], c2[1], c2[2]],
-            "scale" : [scale / 2, scale / 2],
-            "type" : "checkerboard"
+            "uv_scale" : [scale / 2, scale / 2],
+            "type" : "checkerboard2d"
         }
     elif node.bl_idname == "ShaderNodeTexEnvironment":
         texture_copy(node, filepath)
@@ -188,7 +188,7 @@ def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
                 "type" : "texture",
                 "filename" : "textures/"+filename,
                 "gamma" : not is_normal_map,
-                "scale" : scale
+                "uv_scale" : scale
             }
     else:
         print(f"WARN: Unsupported node export: {node.bl_idname}")
