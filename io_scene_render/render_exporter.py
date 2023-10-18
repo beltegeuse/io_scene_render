@@ -140,11 +140,12 @@ def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
         # Checker board
         c1 = node.inputs[1].default_value
         c2 = node.inputs[2].default_value
-        scale = node.inputs[3].default_value
+        uv_scale = node.inputs[3].default_value
         return {
             "color1" : [c1[0], c1[1], c1[2]],
             "color2" : [c2[0], c2[1], c2[2]],
-            "uv_scale" : [scale / 2, scale / 2],
+            "uv_scale" : [uv_scale / 2, uv_scale / 2],
+            "scale" : scale,
             "type" : "checkerboard2d"
         }
     elif node.bl_idname == "ShaderNodeTexEnvironment":
@@ -181,6 +182,7 @@ def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
                 # "rotation" : rot_angles,
                 # "rotationDegree" : rot_anglesDegree,
                 "gamma" : not is_normal_map,
+                "scale" : scale
             }
         else:
             # Default export
@@ -188,7 +190,7 @@ def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
                 "type" : "texture",
                 "filename" : "textures/"+filename,
                 "gamma" : not is_normal_map,
-                "uv_scale" : scale
+                "scale" : scale
             }
     else:
         print(f"WARN: Unsupported node export: {node.bl_idname}")
