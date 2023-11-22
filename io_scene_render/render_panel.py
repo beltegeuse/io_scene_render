@@ -15,7 +15,7 @@ class ExportRendererScene(bpy.types.Operator):
         for frameNumber in range(currentScene.batch_frame_start, currentScene.batch_frame_end +1):
             currentScene.frame_set(frameNumber)
             print("Exporting frame: %s" % (frameNumber))
-            render_exporter.export_renderer(exportPath, currentScene, '{0:05d}'.format(frameNumber))
+            render_exporter.export_renderer(self, exportPath, currentScene, '{0:05d}'.format(frameNumber))
         self.report({'INFO'}, "Export complete.")
         return {"FINISHED"}
 

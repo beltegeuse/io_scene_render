@@ -52,14 +52,14 @@ def measure(first, second):
     distance = sqrt((locx)**2 + (locy)**2 + (locz)**2)
     return distance
 
-def export_camera(scene):
-    print("INFO: Fetching camera..")
+def export_camera(parent, scene):
+    parent.report({'INFO'}, " Fetching camera..")
     cam_ob = bpy.context.scene.camera
     if cam_ob is None:
-        print("ERROR: no scene camera,aborting")
+        parent.error({"ERROR"}, "no scene camera,aborting")
         return {}
     elif cam_ob.type == 'CAMERA':
-        print(f"INFO: Exporting camera: {cam_ob.name} [{scene.render.resolution_x}x{scene.render.resolution_y}]")
+        parent.report({'INFO'}, f"Exporting camera: {cam_ob.name} [{scene.render.resolution_x}x{scene.render.resolution_y}]")
 
         cameramatrix = cam_ob.matrix_world.copy()
         matrixTransposed = cameramatrix.transposed()
@@ -101,23 +101,22 @@ def export_camera(scene):
 def texture_might_exist(inputSlot):
     return len(inputSlot.links) > 0
 
-def texture_copy(node, filepath):
+def texture_copy(parent, node, filepath):
     fromFile = bpy.path.abspath(node.image.filepath)
     head, tail = os.path.split(fromFile)
     
     toFile = bpy.path.abspath(filepath + '/textures/' + tail)
-    print(f"INFO: Copying texture: {fromFile} to {toFile}")
+    parent.report({'INFO'}, f"Copying texture: {fromFile} to {toFile}")
     if os.path.realpath(fromFile) != os.path.realpath(toFile):
         if os.path.exists(toFile):
-            print(f"WARN: Texture already exist: {toFile}. Do not copy")
+             parent.report({'WARNING'}, f"Texture already exist: {toFile}. Do not copy")
         else:
             shutil.copyfile(os.path.realpath(fromFile), os.path.realpath(toFile))
 
-def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
+def texture_or_value (parent, inputSlot, filepath, scale=1.0, is_normal_map = False):
     """Return BSDF information"""
     if(len(inputSlot.links) == 0):
         # TODO: Pas de alpha
-        # print("No link, use value directly")
         return {
             "type" : "constant",
             "value" : [inputSlot.default_value[0] * scale, 
@@ -125,18 +124,20 @@ def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
                        inputSlot.default_value[2] * scale]
         }
     
-    # print(f"Number links: {len(inputSlot.links)}")
     node = inputSlot.links[0].from_node # Take always the first link
 
     # Check if normal map, and get the node
     if node.bl_idname == "ShaderNodeNormalMap":
-        print(f"WARN: Detect normal map, Strength is ignored: {node.inputs['Strength'].default_value}")
-        node = node.inputs["Color"].links[0].from_node
+        parent.report({'WARNING'}, f"Detect normal map, Strength is ignored: {node.inputs['Strength'].default_value}")
+        if len(node.inputs["Color"].links) > 0:
+            node = node.inputs["Color"].links[0].from_node
+        else:
+            return {}
         
 
-    print(f"INFO: Texture type: {node.bl_idname}")
+    parent.report({'INFO'}, f"Texture type: {node.bl_idname}")
     if node.bl_idname == "ShaderNodeTexChecker":
-        print("INFO: Detect checkerboard texture")
+        parent.report({'INFO'}, " Detect checkerboard texture")
         # Checker board
         c1 = node.inputs[1].default_value
         c2 = node.inputs[2].default_value
@@ -149,17 +150,17 @@ def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
             "type" : "checkerboard2d"
         }
     elif node.bl_idname == "ShaderNodeTexEnvironment":
-        texture_copy(node, filepath)
+        texture_copy(parent, node, filepath)
         return {
             "type" : "texture",
             "filename" : "textures/"+node.image.name,
         }
     elif node.bl_idname == "ShaderNodeTexImage":
         filename = os.path.split(node.image.filepath.replace("\\","//"))[1]
-        print(f"INFO: Detect Texture image: {node.image.name} | {filename}") 
-        texture_copy(node, filepath)
+        parent.report({'INFO'}, f"Detect Texture image: {node.image.name} | {filename}") 
+        texture_copy(parent, node, filepath)
         if len(node.inputs[0].links) > 0:
-            print(f"INFO: Number links For Texture mapping: {len(node.inputs[0].links)}")
+            parent.report({'INFO'}, f"Number links For Texture mapping: {len(node.inputs[0].links)}")
 
             # TODO: Assume mapping node for texture manipulation
             # TODO: Fix this later
@@ -193,7 +194,7 @@ def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
                 "scale" : scale
             }
     else:
-        print(f"WARN: Unsupported node export: {node.bl_idname}")
+        parent.report({'WARNING'}, f"Unsupported node export: {node.bl_idname}")
         if is_normal_map:
             return {
                 "type" : "constant",
@@ -208,54 +209,62 @@ def texture_or_value (inputSlot, filepath, scale=1.0, is_normal_map = False):
             }
             
 
-def export_material_node(mat, materialName, filepath):
-    print("INFO: Exporting material node : " + mat.name)
+def export_material_node(parent, mat, materialName, filepath):
+    parent.report({'INFO'}, "Exporting material node type : " + mat.bl_idname)
     mat_data = {}
     if mat.bl_idname == 'ShaderNodeBsdfDiffuse':
         mat_data["type"] = "diffuse"
-        mat_data["albedo"] = texture_or_value(mat.inputs[0], filepath)
+        mat_data["albedo"] = texture_or_value(parent, mat.inputs[0], filepath)
     elif mat.bl_idname == "ShaderNodeEmission":
         mat_data["type"] = "diffuse_light"
         scale = mat.inputs[1].default_value
-        mat_data["radiance"] = texture_or_value(mat.inputs[0], filepath, scale)
+        mat_data["radiance"] = texture_or_value(parent, mat.inputs[0], filepath, scale)
     elif mat.bl_idname == "ShaderNodeBsdfGlass":
         mat_data["type"] = "dielectric"
-        mat_data["ks"] = texture_or_value(mat.inputs[0], filepath) # Color
+        mat_data["ks"] = texture_or_value(parent, mat.inputs[0], filepath) # Color
         mat_data["roughness"] = mat.inputs[1].default_value     # Roughness
         mat_data["eta_int"] = mat.inputs[2].default_value       # IOR
         # TODO: Export IOR (texture - 1d)
     elif mat.bl_idname == "ShaderNodeBsdfGlossy":
         mat_data["type"] = "metal"
-        mat_data["ks"] = texture_or_value(mat.inputs[0], filepath)
+        mat_data["ks"] = texture_or_value(parent, mat.inputs[0], filepath)
         mat_data["roughness"] = mat.inputs[1].default_value
     elif mat.bl_idname == "ShaderNodeBsdfPrincipled":
-        print("WARN: Principled shader not fully supported")
+        parent.report({'WARNING'}, " Principled shader not fully supported")
         # Export as diffuse
         local_material = {}
         local_material["type"] = "diffuse"
-        local_material["albedo"] = texture_or_value(mat.inputs[0], filepath)
+        local_material["albedo"] = texture_or_value(parent, mat.inputs[0], filepath)
         # TODO: Export other parameters
         if texture_might_exist(mat.inputs["Normal"]):
-            # Normal map added if found
-            mat_data["type"] = "normal_map"
-            mat_data["normal_map"] = texture_or_value(mat.inputs["Normal"], filepath, is_normal_map = True)
-            mat_data["material"] = local_material
+            normal_map_params = texture_or_value(parent, mat.inputs["Normal"], filepath, is_normal_map = True)
+            if len(normal_map_params) != 0:
+                # Normal map added if found
+                mat_data["type"] = "normal_map"
+                mat_data["normal_map"] = normal_map_params
+                mat_data["material"] = local_material
+            else:
+                # Ignore normal map
+                parent.report({'WARNING'}, "Normal map ignored -- wrong node topology")
+                mat_data = local_material
+          
+          
         else:
             mat_data = local_material
             
     else:
-        print(f"WARN: Wrong material: {materialName} | type: {mat.bl_idname}")
+        parent.report({'WARNING'}, f"Wrong material: {materialName} | type: {mat.bl_idname}")
         mat_data["type"] = "diffuse"
 
     # Give name 
     mat_data["name"] = materialName
     return mat_data
 
-def export_material(material, filepath):
+def export_material(parent, material, filepath):
     if material is None:
-        print("WARN: no material on object")
+        parent.report({'WARNING'}, " no material on object")
     mats = []
-    print (f'INFO: Exporting material named: {material.name}')
+    parent.report({'INFO'}, f'Exporting material named: {material.name}')
     currentMaterial = None
     material.use_nodes = True
     if material and material.use_nodes: 
@@ -264,7 +273,7 @@ def export_material(material, filepath):
                 for input in node.inputs:
                     for node_links in input.links:
                         currentMaterial =  node_links.from_node
-                        mats += [export_material_node(currentMaterial, material.name, filepath)]
+                        mats += [export_material_node(parent, currentMaterial, material.name, filepath)]
     return mats
 
 def write_obj(file, mesh, indices, normals, i):
@@ -304,7 +313,7 @@ def write_obj(file, mesh, indices, normals, i):
         else:
            out.write(f'f {i+1}//{i+1} {i+2}//{i+2} {i+3}//{i+3}\n')
 
-def export_objects(filepath, scene, frameNumber):
+def export_objects(parent, filepath, scene, frameNumber):
     materials = [
         {"type" : "diffuse", "name" : "DEFAULT", "albedo" : [0.8, 0.8, 0.8]}
     ]
@@ -312,7 +321,7 @@ def export_objects(filepath, scene, frameNumber):
 
     objects = scene.objects
     for object in objects:
-        print(f"INFO: Exporting Object: {object.name}")
+        parent.report({'INFO'}, f"Exporting Object: {object.name}")
 
         if object is not None and object.type != 'CAMERA' and object.type == 'MESH':
             bpy.ops.object.mode_set(mode='OBJECT')
@@ -322,7 +331,7 @@ def export_objects(filepath, scene, frameNumber):
             eval_obj = object.evaluated_get(dg)
             mesh = eval_obj.to_mesh()
             if not mesh.loop_triangles and mesh.polygons:
-                print("WARN: loop triangles...")
+                parent.report({'WARNING'}, " loop triangles...")
                 mesh.calc_loop_triangles()
 
             # Compute normals
@@ -339,7 +348,7 @@ def export_objects(filepath, scene, frameNumber):
                             vertex_index = mesh.loops[loop_index].vertex_index
                             indices.append(vertex_index)
                             normals.append(mesh.loops[loop_index].normal)
-                print(f"INFO: Nb Tri: {len(indices) // 3}") 
+                parent.report({'DEBUG'}, f"Exporting - Nb Tri: {len(indices) // 3}") 
                 if(len(indices) == 0):
                     continue 
                 
@@ -347,14 +356,14 @@ def export_objects(filepath, scene, frameNumber):
                 if len(object.material_slots) != 0:
                     material = object.material_slots[i].material
                     if material.name not in exportedMaterials:
-                        materials += export_material(material, filepath)
+                        materials += export_material(parent, material, filepath)
                         exportedMaterials.append(material.name)
                     
             
                 # Create ouput directory
                 objFolderPath =  bpy.path.abspath(filepath + './meshes/' + frameNumber + '/')
                 if not os.path.exists(objFolderPath):
-                    print(f'Meshes directory did not exist, creating: {objFolderPath}')
+                    parent.report({"WARN"},f'Meshes directory did not exist, creating: {objFolderPath}')
                     os.makedirs(objFolderPath)
 
                 # Compute the path variables
@@ -392,7 +401,7 @@ def export_objects(filepath, scene, frameNumber):
     return (shapes, materials)
             
 
-def export_integrator(scene):
+def export_integrator(parent, scene):
     int_data = {}
     if scene.integrators == 'path':
         int_data["type"] = "path"
@@ -402,11 +411,11 @@ def export_integrator(scene):
     elif scene.integrators == "ao":
         int_data["type"] = "ao"
     else: 
-        print("WARN: Wrong type of integrator")
+        parent.report({'WARNING'}, " Wrong type of integrator")
         int_data["type"] = "path" # Default
     return int_data
 
-def export_background(scene, filepath):
+def export_background(parent, scene, filepath):
     # Fetch world
     outputNode = None
     for n in scene.world.node_tree.nodes:
@@ -421,27 +430,27 @@ def export_background(scene, filepath):
     # Get the node
     node = outputNode.inputs[0].links[0].from_node
     if node.bl_idname == "ShaderNodeBackground":
-        return texture_or_value(node.inputs[0], filepath)
+        return texture_or_value(parent, node.inputs[0], filepath)
     else:
-        print(f"WARN: Unsupported background node: {node.bl_idname}")
+        parent.report({'WARNING'}, f"Unsupported background node: {node.bl_idname}")
         return [0.0, 0.0, 0.0]
 
-def export_renderer(filepath, scene , frameNumber):
+def export_renderer(parent, filepath, scene , frameNumber):
     if filepath == "":
         filepath = os.path.dirname(bpy.data.filepath)
-        print(f"WARN: No output directory, using default: {filepath}")
+        parent.report({'WARNING'}, f"No output directory, using default: {filepath}")
     else:
-        print(f"INFO: Exporting to: {filepath}")
+        parent.report({'INFO'}, f"Exporting to: {filepath}")
 
     # Create output directory
     out = os.path.join(filepath, "test" + frameNumber +".json")
     if not os.path.exists(filepath):
-        print(f'INFO: Output directory did not exist, creating: {filepath}')
+        parent.report({'INFO'}, f'Output directory did not exist, creating: {filepath}')
         os.makedirs(filepath)
 
     # Create texture directory
     if not os.path.exists(filepath + "/textures"):
-        print(f'INFO: Texture directory did not exist, creating: {filepath + "/textures"}')
+        parent.report({'INFO'}, f'Texture directory did not exist, creating: {filepath + "/textures"}')
         os.makedirs(filepath + "/textures")
     
     # Unpack all the local ressources
@@ -453,12 +462,12 @@ def export_renderer(filepath, scene , frameNumber):
     with open(out, 'w') as scene_file:
         data_all ={}
         
-        data_all["background"] = export_background(scene, filepath)
-        data_all["integrator"] = export_integrator(scene)
-        (camera, sampler) = export_camera(scene)
+        data_all["background"] = export_background(parent, scene, filepath)
+        data_all["integrator"] = export_integrator(parent, scene)
+        (camera, sampler) = export_camera(parent, scene)
         data_all["camera"] = camera
         data_all["sampler"] = sampler
-        (shapes, materials) = export_objects(filepath, scene, frameNumber)
+        (shapes, materials) = export_objects(parent, filepath, scene, frameNumber)
         data_all["shapes"] = shapes
         data_all["materials"] = materials
 
