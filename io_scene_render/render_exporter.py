@@ -363,7 +363,7 @@ def export_objects(parent, filepath, scene, frameNumber):
                 # Create ouput directory
                 objFolderPath =  bpy.path.abspath(filepath + './meshes/' + frameNumber + '/')
                 if not os.path.exists(objFolderPath):
-                    parent.report({"WARN"},f'Meshes directory did not exist, creating: {objFolderPath}')
+                    parent.report({"WARNING"},f'Meshes directory did not exist, creating: {objFolderPath}')
                     os.makedirs(objFolderPath)
 
                 # Compute the path variables
