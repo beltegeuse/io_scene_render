@@ -209,7 +209,7 @@ def texture_or_value (parent, inputSlot, filepath, scale=1.0, is_normal_map = Fa
             }
             
 
-def export_material_node(parent, mat, materialName, filepath):
+def export_material_node(parent, scene, mat, materialName, filepath):
     parent.report({'INFO'}, "Exporting material node type : " + mat.bl_idname)
     mat_data = {}
     if mat.bl_idname == 'ShaderNodeBsdfDiffuse':
@@ -235,21 +235,21 @@ def export_material_node(parent, mat, materialName, filepath):
         local_material = {}
         local_material["type"] = "diffuse"
         local_material["albedo"] = texture_or_value(parent, mat.inputs[0], filepath)
-        # TODO: Export other parameters
-        if texture_might_exist(mat.inputs["Normal"]):
-            normal_map_params = texture_or_value(parent, mat.inputs["Normal"], filepath, is_normal_map = True)
-            if len(normal_map_params) != 0:
-                # Normal map added if found
-                mat_data["type"] = "normal_map"
-                mat_data["normal_map"] = normal_map_params
-                mat_data["material"] = local_material
-            else:
-                # Ignore normal map
-                parent.report({'WARNING'}, "Normal map ignored -- wrong node topology")
-                mat_data = local_material
-          
-          
-        else:
+        exported_normal = False
+        if scene.export_normal_map: 
+            # TODO: Export other parameters
+            if texture_might_exist(mat.inputs["Normal"]):
+                normal_map_params = texture_or_value(parent, mat.inputs["Normal"], filepath, is_normal_map = True)
+                if len(normal_map_params) != 0:
+                    # Normal map added if found
+                    mat_data["type"] = "normal_map"
+                    mat_data["normal_map"] = normal_map_params
+                    mat_data["material"] = local_material
+                    exported_normal = True
+                else:
+                    # Ignore normal map
+                    parent.report({'WARNING'}, "Normal map ignored -- wrong node topology")
+        if not exported_normal:
             mat_data = local_material
             
     else:
@@ -260,7 +260,7 @@ def export_material_node(parent, mat, materialName, filepath):
     mat_data["name"] = materialName
     return mat_data
 
-def export_material(parent, material, filepath):
+def export_material(parent, scene, material, filepath):
     if material is None:
         parent.report({'WARNING'}, " no material on object")
     mats = []
@@ -273,7 +273,7 @@ def export_material(parent, material, filepath):
                 for input in node.inputs:
                     for node_links in input.links:
                         currentMaterial =  node_links.from_node
-                        mats += [export_material_node(parent, currentMaterial, material.name, filepath)]
+                        mats += [export_material_node(parent, scene, currentMaterial, material.name, filepath)]
     return mats
 
 def write_obj(file, mesh, indices, normals, i):
@@ -318,29 +318,70 @@ def export_objects(parent, filepath, scene, frameNumber):
         {"type" : "diffuse", "name" : "DEFAULT", "albedo" : [0.8, 0.8, 0.8]}
     ]
     shapes = []
-
-    objects = scene.objects
-    for object in objects:
+    
+    # Compute the objects to export
+    objects = []
+    total = 0
+    for object in scene.objects:
+        if object.hide_render:
+            parent.report({'INFO'}, f"Skipping hidden object: {object.name}")
+            continue
+        if object is not None and object.type == 'MESH':
+            objects.append(object)
+            total += 1
+    
+    # Get the window manager
+    wm = bpy.context.window_manager
+    wm.progress_begin(0, total)
+        
+    
+    for (j, object) in enumerate(objects):
+        # Export the object
         parent.report({'INFO'}, f"Exporting Object: {object.name}")
+        wm.progress_update(j)
+        
+        # Apply modifiers
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.context.view_layer.update()
+        object.data.update()
+        dg = bpy.context.evaluated_depsgraph_get()
+        eval_obj = object.evaluated_get(dg)
+        mesh = eval_obj.to_mesh()
+        if not mesh.loop_triangles and mesh.polygons:
+            parent.report({'WARNING'}, " loop triangles...")
+            mesh.calc_loop_triangles()
 
-        if object is not None and object.type != 'CAMERA' and object.type == 'MESH':
-            bpy.ops.object.mode_set(mode='OBJECT')
-            bpy.context.view_layer.update()
-            object.data.update()
-            dg = bpy.context.evaluated_depsgraph_get()
-            eval_obj = object.evaluated_get(dg)
-            mesh = eval_obj.to_mesh()
-            if not mesh.loop_triangles and mesh.polygons:
-                parent.report({'WARNING'}, " loop triangles...")
-                mesh.calc_loop_triangles()
+        # Compute normals
+        mesh.calc_normals_split()
 
-            # Compute normals
-            mesh.calc_normals_split()
+        for i in range(max(len(object.material_slots), 1)):    
+            # Export the material if needed
+            if len(object.material_slots) != 0:
+                material = object.material_slots[i].material
+                if material.name not in exportedMaterials:
+                    materials += export_material(parent, scene, material, filepath)
+                    exportedMaterials.append(material.name)
+                
+        
+            # Create ouput directory
+            objFolderPath =  bpy.path.abspath(filepath + './meshes/' + frameNumber + '/')
+            if not os.path.exists(objFolderPath):
+                parent.report({"WARNING"},f'Meshes directory did not exist, creating: {objFolderPath}')
+                os.makedirs(objFolderPath)
 
-            for i in range(max(len(object.material_slots), 1)):
-                # Export the mesh
-                indices = []
-                normals = []
+            # Compute the path variables
+            objName = object.name + f'_mat{i}.obj' 
+            objName = objName.replace(":","_")
+            objFilePath = objFolderPath + objName
+            objFilePathRel = 'meshes/' + frameNumber + '/' + objName
+
+            # Export obj manually
+            indices = []
+            normals = []
+            if os.path.exists(objFilePath) and not scene.reexport_geometry:
+                parent.report({'INFO'}, f"Skipping existing file: {objFilePath}")
+            else:
+                parent.report({'INFO'}, f"Exporting file: {objFilePath}")
                 for loop_tri in mesh.loop_triangles:
                     polygon = mesh.polygons[loop_tri.polygon_index]
                     if polygon.material_index == i:
@@ -351,52 +392,31 @@ def export_objects(parent, filepath, scene, frameNumber):
                 parent.report({'DEBUG'}, f"Exporting - Nb Tri: {len(indices) // 3}") 
                 if(len(indices) == 0):
                     continue 
-                
-                # Export the material if needed
-                if len(object.material_slots) != 0:
-                    material = object.material_slots[i].material
-                    if material.name not in exportedMaterials:
-                        materials += export_material(parent, material, filepath)
-                        exportedMaterials.append(material.name)
-                    
-            
-                # Create ouput directory
-                objFolderPath =  bpy.path.abspath(filepath + './meshes/' + frameNumber + '/')
-                if not os.path.exists(objFolderPath):
-                    parent.report({"WARNING"},f'Meshes directory did not exist, creating: {objFolderPath}')
-                    os.makedirs(objFolderPath)
-
-                # Compute the path variables
-                objName = object.name + f'_mat{i}.obj' 
-                objName = objName.replace(":","_")
-                objFilePath = objFolderPath + objName
-                objFilePathRel = 'meshes/' + frameNumber + '/' + objName
-
-                # Export obj manually
                 write_obj(objFilePath, mesh, indices, normals, i)
 
-                # Create entry
-                # TODO: Manage participating media
-                #exportObject_medium(scene_file, object.material_slots[0].material)
-                shape_data = {}
-                shape_data["type"] = "mesh"
-                shape_data["filename"] = objFilePathRel
-                if len(object.material_slots) != 0:
-                    shape_data["material"] = object.material_slots[i].material.name
-                else:
-                    # Use the default material
-                    shape_data["material"] = "DEFAULT"
-                
-                matrix =  object.matrix_world # transposed()
-                shape_data["transform"] = {
-                    "matrix" : [
-                        matrix[0][0],matrix[0][1],matrix[0][2],matrix[0][3],
-                        matrix[1][0],matrix[1][1],matrix[1][2],matrix[1][3],
-                        matrix[2][0],matrix[2][1],matrix[2][2],matrix[2][3],
-                        matrix[3][0],matrix[3][1],matrix[3][2],matrix[3][3]
-                    ]
-                }                
-                shapes += [shape_data]
+            # Create entry
+            # TODO: Manage participating media
+            #exportObject_medium(scene_file, object.material_slots[0].material)
+            shape_data = {}
+            shape_data["type"] = "mesh"
+            shape_data["filename"] = objFilePathRel
+            if len(object.material_slots) != 0:
+                shape_data["material"] = object.material_slots[i].material.name
+            else:
+                # Use the default material
+                shape_data["material"] = "DEFAULT"
+            
+            matrix =  object.matrix_world # transposed()
+            shape_data["transform"] = {
+                "matrix" : [
+                    matrix[0][0],matrix[0][1],matrix[0][2],matrix[0][3],
+                    matrix[1][0],matrix[1][1],matrix[1][2],matrix[1][3],
+                    matrix[2][0],matrix[2][1],matrix[2][2],matrix[2][3],
+                    matrix[3][0],matrix[3][1],matrix[3][2],matrix[3][3]
+                ]
+            }                
+            shapes += [shape_data]
+    wm.progress_end()
 
     return (shapes, materials)
             

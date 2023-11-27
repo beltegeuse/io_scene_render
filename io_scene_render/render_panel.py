@@ -80,7 +80,13 @@ class RendererRenderSettingsPanel(bpy.types.Panel):
         #     pass
         # if scene.integrators == 'normal':
         #     pass
+        
         layout.label(text="Export:")
+        row = layout.row()
+        layout.prop(scene, "export_normal_map")
+        row = layout.row()
+        layout.prop(scene, "reexport_geometry")
+        
         row = layout.row()
         layout.operator("scene.export", icon='MESH_CUBE', text="Export scene")
 
@@ -101,8 +107,13 @@ def register():
     bpy.types.Scene.batch_frame_start = bpy.props.IntProperty(name = "Frame start", description = "Frame start", default = 1, min = 1, max = 9999999)
     bpy.types.Scene.batch_frame_end = bpy.props.IntProperty(name = "Frame end", description = "Frame end", default = 1, min = 1, max = 9999999)
 
+    bpy.types.Scene.export_normal_map = bpy.props.BoolProperty(name = "Export normal map", description = "Export normal map", default = True)
+    bpy.types.Scene.reexport_geometry = bpy.props.BoolProperty(name = "Reexport geometry", description = "Reexport geometry", default = True)
+    
     integrators = [("path", "path", "", 1),("normal", "normal", "", 2),("ao", "ao", "", 3)]
     bpy.types.Scene.integrators = bpy.props.EnumProperty(name = "Name", items=integrators , default="path")
+    
+    
 
     # Specific settings
     bpy.types.Scene.path_integrator_max_depth = bpy.props.IntProperty(name = "Max depth", description = "Specifies the longest path depth in the generated output image (where -1 corresponds to infty). A value of 1 will only render directly visible light sources. 2 will lead to single-bounce (direct-only) illumination, and so on.", default = 16, min = -1, max = 9999)
