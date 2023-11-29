@@ -116,13 +116,13 @@ def texture_copy(parent, node, filepath):
 def texture_or_value (parent, inputSlot, filepath, scale=1.0, is_normal_map = False):
     """Return BSDF information"""
     if(len(inputSlot.links) == 0):
-        # TODO: Pas de alpha
-        return {
-            "type" : "constant",
-            "value" : [inputSlot.default_value[0] * scale, 
-                       inputSlot.default_value[1] * scale, 
-                       inputSlot.default_value[2] * scale]
-        }
+        if type(inputSlot.default_value) == float:
+            return inputSlot.default_value * scale
+        else: 
+            return [inputSlot.default_value[0] * scale, 
+                    inputSlot.default_value[1] * scale, 
+                    inputSlot.default_value[2] * scale]
+
     
     node = inputSlot.links[0].from_node # Take always the first link
 
@@ -194,19 +194,19 @@ def texture_or_value (parent, inputSlot, filepath, scale=1.0, is_normal_map = Fa
                 "scale" : scale
             }
     else:
-        parent.report({'WARNING'}, f"Unsupported node export: {node.bl_idname}")
+        parent.report({'WARNING'}, f"Unsupported node export: {node.bl_idname} | default: {inputSlot.default_value} | {type(inputSlot.default_value)}")
         if is_normal_map:
             return {
                 "type" : "constant",
                 "value" : [0, 0, 1]
             }
         else:
-            return {
-                "type" : "constant",
-                "value" : [inputSlot.default_value[0] * scale, 
+            if type(inputSlot.default_value) == float:
+                return inputSlot.default_value * scale
+            else: 
+                return [inputSlot.default_value[0] * scale, 
                         inputSlot.default_value[1] * scale, 
                         inputSlot.default_value[2] * scale]
-            }
             
 
 def export_material_node(parent, scene, mat, materialName, filepath):
@@ -219,6 +219,21 @@ def export_material_node(parent, scene, mat, materialName, filepath):
         mat_data["type"] = "diffuse_light"
         scale = mat.inputs[1].default_value
         mat_data["radiance"] = texture_or_value(parent, mat.inputs[0], filepath, scale)
+    elif mat.bl_idname == "ShaderNodeMixShader":
+        fresnel = False
+        if(len(mat.inputs[0].links) != 0):
+            node = mat.inputs[0].links[0].from_node
+            fresnel = (node.bl_idname == "ShaderNodeFresnel")
+        # else blend
+        if fresnel:
+            mat_data["type"] = "fresnel_blend"
+            fresnel_node = mat.inputs[0].links[0].from_node
+            mat_data["eta"] = texture_or_value(parent, fresnel_node.inputs[0], filepath)
+        else:
+            mat_data["type"] = "blend"
+            mat_data["alpha"] = texture_or_value(parent, mat.inputs[0], filepath)
+        mat_data["matA"] = export_material_node(parent, scene, mat.inputs[2].links[0].from_node, materialName, filepath)
+        mat_data["matB"] = export_material_node(parent, scene, mat.inputs[1].links[0].from_node, materialName, filepath)
     elif mat.bl_idname == "ShaderNodeBsdfGlass":
         mat_data["type"] = "dielectric"
         mat_data["ks"] = texture_or_value(parent, mat.inputs[0], filepath) # Color
@@ -233,8 +248,28 @@ def export_material_node(parent, scene, mat, materialName, filepath):
         parent.report({'WARNING'}, " Principled shader not fully supported")
         # Export as diffuse
         local_material = {}
-        local_material["type"] = "diffuse"
-        local_material["albedo"] = texture_or_value(parent, mat.inputs[0], filepath)
+        if scene.improved_principled:
+            local_material["type"] = "blend"
+            base_color = texture_or_value(parent, mat.inputs["Base Color"], filepath)
+            local_material["alpha"] = texture_or_value(parent, mat.inputs["Metallic"], filepath)
+            local_material["matA"] = {
+                "type" : "metal",
+                "ks" : base_color,
+                "roughness" : texture_or_value(parent, mat.inputs["Roughness"], filepath),
+                "specular": texture_or_value(parent, mat.inputs["Specular"], filepath),
+                "anisotropic": texture_or_value(parent, mat.inputs["Anisotropic"], filepath),
+                "anisotropic_rotation": texture_or_value(parent, mat.inputs["Anisotropic Rotation"], filepath),
+            }
+            local_material["matB"] = {
+                "type" : "diffuse",
+                "albedo" : base_color
+            }
+            if mat.inputs["Transmission"].default_value > 0.0:
+                parent.report({'ERROR'}, " Transmission not supported")
+            
+        else:
+            local_material["type"] = "diffuse"
+            local_material["albedo"] = texture_or_value(parent, mat.inputs[0], filepath)
         exported_normal = False
         if scene.export_normal_map: 
             # TODO: Export other parameters
@@ -258,6 +293,10 @@ def export_material_node(parent, scene, mat, materialName, filepath):
 
     # Give name 
     mat_data["name"] = materialName
+    if not ("type" in mat_data):
+        parent.report({'ERROR'}, f"Wrong material: {materialName} | type: {mat.bl_idname} | json: {mat_data}")
+        mat_data["type"] = "diffuse"
+        mat_data["albedo"] = [0.8, 0.0, 0.8]
     return mat_data
 
 def export_material(parent, scene, material, filepath):
@@ -488,8 +527,8 @@ def export_renderer(parent, filepath, scene , frameNumber):
         data_all["camera"] = camera
         data_all["sampler"] = sampler
         (shapes, materials) = export_objects(parent, filepath, scene, frameNumber)
-        data_all["shapes"] = shapes
         data_all["materials"] = materials
+        data_all["shapes"] = shapes
 
         exported_json_string = json.dumps(data_all, indent=4)
         scene_file.write(exported_json_string)

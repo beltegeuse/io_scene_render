@@ -86,6 +86,8 @@ class RendererRenderSettingsPanel(bpy.types.Panel):
         layout.prop(scene, "export_normal_map")
         row = layout.row()
         layout.prop(scene, "reexport_geometry")
+        row = layout.row()
+        layout.prop(scene, "improved_principled")
         
         row = layout.row()
         layout.operator("scene.export", icon='MESH_CUBE', text="Export scene")
@@ -109,6 +111,7 @@ def register():
 
     bpy.types.Scene.export_normal_map = bpy.props.BoolProperty(name = "Export normal map", description = "Export normal map", default = True)
     bpy.types.Scene.reexport_geometry = bpy.props.BoolProperty(name = "Reexport geometry", description = "Reexport geometry", default = True)
+    bpy.types.Scene.improved_principled = bpy.props.BoolProperty(name = "Improved Principled", description = "Improved Principled export", default = False)
     
     integrators = [("path", "path", "", 1),("normal", "normal", "", 2),("ao", "ao", "", 3)]
     bpy.types.Scene.integrators = bpy.props.EnumProperty(name = "Name", items=integrators , default="path")
