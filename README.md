@@ -1,7 +1,7 @@
-# MTI 882 - Blender exporter
+# MTI 870 - Blender exporter
 
-This is the experimental blender exporter for MTI 882. 
-This plugin have been only tested for Blender 3.2. 
+This is the experimental blender exporter for MTI 870. 
+This plugin have been only tested for Blender 3.2. More Blender version should works.
 
 ## Installation
 
@@ -17,12 +17,12 @@ The main steps for installing this plugin:
 
 ![Render screenshot](imgs/engine.png)
 
-6) Go at the bottom of the panel (scrolling down). Specify inside `MTI Render settings` the output directory. Press export the scene.
+6) Go to the bottom of the panel (scrolling down). Specify inside `MTI Render settings` the output directory. Press export the scene.
 
 ![Export screenshot](imgs/export.png)
 
 ## Issues
-- If the output directory is not specify, the export button crash.
+- If the output directory is not specified, the export button crashes.
 
 ## TODOs
 - Support more conversion from Cycles materials to renderer
