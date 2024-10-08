@@ -8,15 +8,32 @@ class ExportRendererScene(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
     COMPAT_ENGINES = {'Renderer_Renderer'}
     
+    # Error handling
+    fatal_error = False
+    error_or_warning = False
+    
     def execute(self, context):
         # Get the scene and abs path (if provided)
         currentScene = bpy.context.scene
         exportPath = bpy.path.abspath(currentScene.exportpath)
+        
+        # Reset error handling
+        self.error_or_warning = False
+        self.fatal_error = False
+        
         for frameNumber in range(currentScene.batch_frame_start, currentScene.batch_frame_end +1):
             currentScene.frame_set(frameNumber)
             print("Exporting frame: %s" % (frameNumber))
             render_exporter.export_renderer(self, exportPath, currentScene, '{0:05d}'.format(frameNumber))
-        self.report({'INFO'}, "Export complete.")
+            
+        # Check if there was an error during export
+        if self.error_or_warning:
+            if self.fatal_error:
+                self.report({'ERROR'}, "Export failed (please check log) - likely a fatal error that will prevent to use the scene.")
+            else:
+                self.report({'WARNING'}, "Export generated warnings (please check log).")
+        else:
+            self.report({'INFO'}, "Export complete.")
         return {"FINISHED"}
 
 class RendererRenderSettingsPanel(bpy.types.Panel):
@@ -88,6 +105,8 @@ class RendererRenderSettingsPanel(bpy.types.Panel):
         layout.prop(scene, "reexport_geometry")
         row = layout.row()
         layout.prop(scene, "improved_principled")
+        row = layout.row()
+        layout.prop(scene, "envmap")
         
         row = layout.row()
         layout.operator("scene.export", icon='MESH_CUBE', text="Export scene")
@@ -109,9 +128,10 @@ def register():
     bpy.types.Scene.batch_frame_start = bpy.props.IntProperty(name = "Frame start", description = "Frame start", default = 1, min = 1, max = 9999999)
     bpy.types.Scene.batch_frame_end = bpy.props.IntProperty(name = "Frame end", description = "Frame end", default = 1, min = 1, max = 9999999)
 
-    bpy.types.Scene.export_normal_map = bpy.props.BoolProperty(name = "Export normal map", description = "Export normal map", default = True)
+    bpy.types.Scene.export_normal_map = bpy.props.BoolProperty(name = "Export normal map", description = "Export normal map", default = False)
     bpy.types.Scene.reexport_geometry = bpy.props.BoolProperty(name = "Reexport geometry", description = "Reexport geometry", default = True)
     bpy.types.Scene.improved_principled = bpy.props.BoolProperty(name = "Improved Principled", description = "Improved Principled export", default = False)
+    bpy.types.Scene.envmap = bpy.props.BoolProperty(name = "Export envmap", description = "Export envmap", default = False)
     
     integrators = [("path", "path", "", 1),("normal", "normal", "", 2),("ao", "ao", "", 3)]
     bpy.types.Scene.integrators = bpy.props.EnumProperty(name = "Name", items=integrators , default="path")
