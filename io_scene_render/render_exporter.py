@@ -276,10 +276,10 @@ def export_material_node(parent, scene, mat, materialName, filepath):
         mat_data["roughness"] = mat.inputs[1].default_value     # Roughness
         mat_data["eta_int"] = mat.inputs[2].default_value       # IOR
         # TODO: Export IOR (texture - 1d)
-    elif mat.bl_idname == "ShaderNodeBsdfGlossy":
+    elif mat.bl_idname == "ShaderNodeBsdfGlossy" or mat.bl_idname == "ShaderNodeBsdfAnisotropic":
         mat_data["type"] = "metal"
         mat_data["ks"] = texture_or_value(parent, mat.inputs[0], filepath)
-        mat_data["roughness"] = mat.inputs[1].default_value
+        mat_data["roughness"] = mat.inputs[1].default_value # roughness
     elif mat.bl_idname == "ShaderNodeBsdfPrincipled":
         parent.report({'WARNING'}, " Principled shader not fully supported")
         parent.error_or_warning = True
