@@ -286,6 +286,41 @@ def export_material_node(parent, scene, mat, materialName, filepath):
         # Export as diffuse
         local_material = {}
         if scene.improved_principled:
+            # Examples of inputs:
+            # Principled input: Base Color | default: <bpy_float[4], NodeSocketColor.default_value> | links: 1
+            # Principled input: Metallic | default: 0.20000000298023224 | links: 0
+            # Principled input: Roughness | default: 0.5 | links: 1
+            # Principled input: IOR | default: 1.4500000476837158 | links: 0
+            # Principled input: Alpha | default: 1.0 | links: 0
+            # Principled input: Normal | default: <bpy_float[3], NodeSocketVector.default_value> | links: 1
+            # Principled input: Weight | default: 0.0 | links: 0
+            # Principled input: Diffuse Roughness | default: 0.0 | links: 0
+            # Principled input: Subsurface Weight | default: 0.0 | links: 0
+            # Principled input: Subsurface Radius | default: <bpy_float[3], NodeSocketVector.default_value> | links: 0
+            # Principled input: Subsurface Scale | default: 0.05000000074505806 | links: 0
+            # Principled input: Subsurface IOR | default: 1.399999976158142 | links: 0
+            # Principled input: Subsurface Anisotropy | default: 0.0 | links: 0
+            # Principled input: Specular IOR Level | default: 0.20000000298023224 | links: 0
+            # Principled input: Specular Tint | default: <bpy_float[4], NodeSocketColor.default_value> | links: 0
+            # Principled input: Anisotropic | default: 0.0 | links: 0
+            # Principled input: Anisotropic Rotation | default: 0.0 | links: 0
+            # Principled input: Tangent | default: <bpy_float[3], NodeSocketVector.default_value> | links: 0
+            # Principled input: Transmission Weight | default: 0.0 | links: 0
+            # Principled input: Coat Weight | default: 0.0 | links: 0
+            # Principled input: Coat Roughness | default: 0.029999999329447746 | links: 0
+            # Principled input: Coat IOR | default: 1.5 | links: 0
+            # Principled input: Coat Tint | default: <bpy_float[4], NodeSocketColor.default_value> | links: 0
+            # Principled input: Coat Normal | default: <bpy_float[3], NodeSocketVector.default_value> | links: 0
+            # Principled input: Sheen Weight | default: 0.0 | links: 0
+            # Principled input: Sheen Roughness | default: 0.5 | links: 0
+            # Principled input: Sheen Tint | default: <bpy_float[4], NodeSocketColor.default_value> | links: 0
+            # Principled input: Emission Color | default: <bpy_float[4], NodeSocketColor.default_value> | links: 0
+            # Principled input: Emission Strength | default: 1.0 | links: 0
+            # Principled input: Thin Film Thickness | default: 0.0 | links: 0
+            # Principled input: Thin Film IOR | default: 1.3300000429153442 | links: 0
+            parent.report({'INFO'}, " Using improved principled material export")
+            # for input in mat.inputs:
+            #     parent.report({'INFO'}, f" Principled input: {input.name} | default: {input.default_value} | links: {len(input.links)}")
             local_material["type"] = "blend"
             base_color = texture_or_value(parent, mat.inputs["Base Color"], filepath)
             local_material["alpha"] = texture_or_value(parent, mat.inputs["Metallic"], filepath)
@@ -293,7 +328,7 @@ def export_material_node(parent, scene, mat, materialName, filepath):
                 "type" : "metal",
                 "ks" : base_color,
                 "roughness" : texture_or_value(parent, mat.inputs["Roughness"], filepath),
-                "specular": texture_or_value(parent, mat.inputs["Specular"], filepath),
+                "specular": texture_or_value(parent, mat.inputs["Specular Tint"], filepath),
                 "anisotropic": texture_or_value(parent, mat.inputs["Anisotropic"], filepath),
                 "anisotropic_rotation": texture_or_value(parent, mat.inputs["Anisotropic Rotation"], filepath),
             }
@@ -301,7 +336,7 @@ def export_material_node(parent, scene, mat, materialName, filepath):
                 "type" : "diffuse",
                 "albedo" : base_color
             }
-            if mat.inputs["Transmission"].default_value > 0.0:
+            if mat.inputs["Transmission Weight"].default_value > 0.0:
                 parent.error_or_warning = True
                 parent.report({'WARNING'}, " Transmission not supported")
             
