@@ -267,7 +267,7 @@ def export_material_node(parent, scene, mat, materialName, filepath):
         if fresnel:
             mat_data["type"] = "fresnel_blend"
             fresnel_node = mat.inputs[0].links[0].from_node
-            mat_data["eta"] = texture_or_value(parent, fresnel_node.inputs[0], filepath)
+            mat_data["eta"] = texture_or_value(parent, fresnel_node.inputs[0], filepath, is_data = True)
         else:
             mat_data["type"] = "blend"
             mat_data["alpha"] = texture_or_value(parent, mat.inputs[0], filepath, is_data = True)
@@ -330,7 +330,7 @@ def export_material_node(parent, scene, mat, materialName, filepath):
             local_material["matA"] = {
                 "type" : "metal",
                 "ks" : base_color,
-                "roughness" : texture_or_value(parent, mat.inputs["Roughness"], filepath),
+                "roughness" : texture_or_value(parent, mat.inputs["Roughness"], filepath, is_data = True),
                 "specular": texture_or_value(parent, mat.inputs["Specular Tint"], filepath),
                 "anisotropic": texture_or_value(parent, mat.inputs["Anisotropic"], filepath),
                 "anisotropic_rotation": texture_or_value(parent, mat.inputs["Anisotropic Rotation"], filepath),
