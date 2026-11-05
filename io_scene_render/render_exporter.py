@@ -378,65 +378,176 @@ def export_material_node(parent, scene, mat, materialName, filepath):
     return mat_data
 
 def export_material(parent, scene, material, filepath):
-    if material is None:
-        parent.report({'WARNING'}, " no material on object")
-        parent.error_or_warning = True
     mats = []
     parent.report({'INFO'}, f'Exporting material named: {material.name}')
-    currentMaterial = None
-    material.use_nodes = True
-    if material and material.use_nodes: 
+    if material.node_tree is not None:
         for node in material.node_tree.nodes:
             if node.type == "OUTPUT_MATERIAL":
                 for input in node.inputs:
                     for node_links in input.links:
                         currentMaterial =  node_links.from_node
                         mats += [export_material_node(parent, scene, currentMaterial, material.name, filepath)]
+    if len(mats) == 0:
+        # The shapes reference this material by name: it has to exist in the scene file
+        parent.report({'WARNING'}, f"Material without connected output: {material.name}, using a diffuse")
+        parent.error_or_warning = True
+        mats = [{"type" : "diffuse", "name" : material.name, "albedo" : [0.8, 0.8, 0.8]}]
     return mats
 
-def write_obj(file, mesh, indices, normals, i):
-    # Pack U,V
-    uvs = []
-    for uv_layer in mesh.uv_layers:
-        for tri in mesh.loop_triangles:
-            if tri.material_index == i:
-                for loop_index in tri.loops:
-                    uvs.append((
-                        uv_layer.data[loop_index].uv[0],
-                        uv_layer.data[loop_index].uv[1]
-                    ))
+def read_mesh_triangles(mesh, nb_parts):
+    """Read the triangle corners of an evaluated mesh as numpy arrays.
 
-    # write obj
-    out = open(file, 'w')
+    Returns the loop index of each triangle corner (shape: nb_triangles x 3), the
+    part of each triangle, and the per-loop positions / normals / uvs (uvs: None if
+    the mesh has no UV layer). Adding 0.0 turns -0.0 into 0.0, so that equal values
+    have equal bytes when welding the vertices.
+    """
+    nb_triangles = len(mesh.loop_triangles)
+    triangle_loops = np.empty(nb_triangles * 3, dtype=np.int32)
+    mesh.loop_triangles.foreach_get("loops", triangle_loops)
+    triangle_materials = np.empty(nb_triangles, dtype=np.int32)
+    mesh.loop_triangles.foreach_get("material_index", triangle_materials)
 
-    # write vertices positions
-    for id_vertex in indices:
-        out.write('v {:.6f} {:.6f} {:.6f}\n'.format( 
-            mesh.vertices[id_vertex].co.x, 
-            mesh.vertices[id_vertex].co.y, 
-            mesh.vertices[id_vertex].co.z)
-        )
-    
-    for n in normals:
-        out.write('vn {:.6f} {:.6f} {:.6f}\n'.format(n[0], n[1], n[2]))
+    nb_loops = len(mesh.loops)
+    loop_vertices = np.empty(nb_loops, dtype=np.int32)
+    mesh.loops.foreach_get("vertex_index", loop_vertices)
+    vertex_positions = np.empty(len(mesh.vertices) * 3, dtype=np.float32)
+    mesh.vertices.foreach_get("co", vertex_positions)
+    positions = vertex_positions.reshape(-1, 3)[loop_vertices] + 0.0
 
-    if len(uvs) != 0:
-        for id in range(len(indices)):
-            out.write('vt {:.6f} {:.6f}\n'.format(uvs[id][0],  uvs[id][1]))
+    normals = np.empty(nb_loops * 3, dtype=np.float32)
+    mesh.corner_normals.foreach_get("vector", normals)
+    normals = normals.reshape(-1, 3) + 0.0
 
-    # write f: ver ind/ uv ind
-    for i in range(0, len(indices), 3):
-        if len(uvs) != 0:
-            out.write(f'f {i+1}/{i+1}/{i+1} {i+2}/{i+2}/{i+2} {i+3}/{i+3}/{i+3}\n')
+    uvs = None
+    uv_layer = next((layer for layer in mesh.uv_layers if layer.active_render), None)
+    if uv_layer is not None:
+        uvs = np.empty(nb_loops * 2, dtype=np.float32)
+        uv_layer.uv.foreach_get("vector", uvs)
+        uvs = uvs.reshape(-1, 2) + 0.0
+
+    # Like Blender, an out of range material index uses the last material
+    triangle_parts = np.clip(triangle_materials, 0, nb_parts - 1)
+    return triangle_loops.reshape(-1, 3), triangle_parts, positions, normals, uvs
+
+def write_ply(filepath, triangle_loops, positions, normals, uvs):
+    """Write triangles as a binary PLY with welded vertices.
+
+    A vertex is unique per (position, normal, uv). The renderers rely on it: they use
+    the vertex indices of the faces to accumulate the tangents.
+    """
+    fields = [("position", "<f4", (3,)), ("normal", "<f4", (3,))]
+    if uvs is not None:
+        fields.append(("uv", "<f4", (2,)))
+    vertex_type = np.dtype(fields)
+
+    corners = triangle_loops.ravel()
+    corner_vertices = np.empty(len(corners), dtype=vertex_type)
+    corner_vertices["position"] = positions[corners]
+    corner_vertices["normal"] = normals[corners]
+    if uvs is not None:
+        corner_vertices["uv"] = uvs[corners]
+
+    # Weld, keeping the vertices in order of first use (better memory locality for the renderers)
+    corner_bytes = corner_vertices.view(np.dtype((np.void, vertex_type.itemsize)))
+    _, first_corner, unique_index = np.unique(corner_bytes, return_index=True, return_inverse=True)
+    order = np.argsort(first_corner)
+    new_index = np.empty(len(order), dtype=np.int32)
+    new_index[order] = np.arange(len(order), dtype=np.int32)
+
+    vertices = corner_vertices[first_corner[order]]
+    faces = np.empty(len(triangle_loops), dtype=[("count", "u1"), ("indices", "<i4", (3,))])
+    faces["count"] = 3
+    faces["indices"] = new_index[unique_index.ravel()].reshape(-1, 3)
+
+    uv_header = "property float s\nproperty float t\n" if uvs is not None else ""
+    header = (
+        "ply\n"
+        "format binary_little_endian 1.0\n"
+        "comment Created by io_scene_render\n"
+        f"element vertex {len(vertices)}\n"
+        "property float x\nproperty float y\nproperty float z\n"
+        "property float nx\nproperty float ny\nproperty float nz\n"
+        f"{uv_header}"
+        f"element face {len(faces)}\n"
+        "property list uchar int vertex_indices\n"
+        "end_header\n"
+    )
+    with open(filepath, "wb") as out:
+        out.write(header.encode("ascii"))
+        vertices.tofile(out)
+        faces.tofile(out)
+
+def export_mesh_parts(parent, scene, depsgraph, object, nb_parts, folder, relative_folder, stem):
+    """Write one PLY per material slot of the object.
+
+    Returns the relative path of each part (None when no triangle uses the slot).
+    """
+    names = [f"{stem}_mat{i}.ply" for i in range(nb_parts)]
+    todo = []
+    results = [None] * nb_parts
+    for i, name in enumerate(names):
+        if os.path.exists(folder + name) and not scene.reexport_geometry:
+            parent.report({'INFO'}, f"Skipping existing file: {folder + name}")
+            results[i] = relative_folder + name
         else:
-           out.write(f'f {i+1}//{i+1} {i+2}//{i+2} {i+3}//{i+3}\n')
+            todo.append(i)
+    if len(todo) == 0:
+        return results
+
+    eval_obj = object.evaluated_get(depsgraph)
+    mesh = eval_obj.to_mesh()
+    try:
+        triangle_loops, triangle_parts, positions, normals, uvs = read_mesh_triangles(mesh, nb_parts)
+        for i in todo:
+            part_loops = triangle_loops[triangle_parts == i]
+            if len(part_loops) == 0:
+                continue
+            parent.report({'INFO'}, f"Exporting file: {folder + names[i]} - Nb Tri: {len(part_loops)}")
+            write_ply(folder + names[i], part_loops, positions, normals, uvs)
+            results[i] = relative_folder + names[i]
+    finally:
+        eval_obj.to_mesh_clear()
+    return results
+
+def can_share_mesh(object):
+    """Objects can share a file only when their evaluated geometry is the one of the mesh data."""
+    return len(object.modifiers) == 0 and not object.show_only_shape_key
+
+def unique_file_stem(stem, key, used_stems):
+    """Make a mesh name usable as a file name, without clash with another mesh."""
+    stem = re.sub(r'[<>:"/\\|?*]', "_", stem)
+    candidate = stem
+    suffix = 1
+    while used_stems.setdefault(candidate, key) != key:
+        candidate = f"{stem}_{suffix}"
+        suffix += 1
+    return candidate
 
 def export_objects(parent, filepath, scene, frameNumber):
     materials = [
         {"type" : "diffuse", "name" : "DEFAULT", "albedo" : [0.8, 0.8, 0.8]}
     ]
     shapes = []
-    
+
+    # The edits of a mesh in edit mode are only visible once back to object mode
+    if bpy.context.mode != 'OBJECT':
+        bpy.ops.object.mode_set(mode='OBJECT')
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+
+    # Create ouput directory
+    relative_folder = 'meshes/' + frameNumber + '/'
+    meshFolderPath = bpy.path.abspath(filepath + '/' + relative_folder)
+    if not os.path.exists(meshFolderPath):
+        parent.report({"INFO"},f'Meshes directory did not exist, creating: {meshFolderPath}')
+        os.makedirs(meshFolderPath)
+
+    # Files already written for this frame: objects sharing a mesh reuse them.
+    # The renderers still load one copy per object (instancing is not supported).
+    exported_parts = {}
+    used_stems = {}
+
+
     # Compute the objects to export
     objects = []
     total = 0
@@ -457,70 +568,47 @@ def export_objects(parent, filepath, scene, frameNumber):
         # Export the object
         parent.report({'INFO'}, f"Exporting Object: {object.name}")
         wm.progress_update(j)
-        
-        # Apply modifiers
-        bpy.ops.object.mode_set(mode='OBJECT')
-        bpy.context.view_layer.update()
-        object.data.update()
-        dg = bpy.context.evaluated_depsgraph_get()
-        eval_obj = object.evaluated_get(dg)
-        mesh = eval_obj.to_mesh()
-        if not mesh.loop_triangles and mesh.polygons:
-            parent.report({'INFO'}, " loop triangles...")
-            mesh.calc_loop_triangles()
 
-        for i in range(max(len(object.material_slots), 1)):    
+        # Export the geometry, once per mesh when the objects can share it
+        nb_parts = max(len(object.material_slots), 1)
+        if can_share_mesh(object):
+            key = (object.data.as_pointer(), nb_parts)
+            stem = object.data.name if object.data.users > 1 else object.name
+        else:
+            key = (object.as_pointer(), nb_parts)
+            stem = object.name
+        if key not in exported_parts:
+            stem = unique_file_stem(stem, key, used_stems)
+            exported_parts[key] = export_mesh_parts(parent, scene, depsgraph, object, nb_parts, meshFolderPath, relative_folder, stem)
+        else:
+            parent.report({'INFO'}, f"Reusing the files of mesh: {object.data.name}")
+
+        for i in range(nb_parts):
             # Export the material if needed
-            if len(object.material_slots) != 0:
-                material = object.material_slots[i].material
-                if material.name not in exportedMaterials:
-                    materials += export_material(parent, scene, material, filepath)
-                    exportedMaterials.append(material.name)
-                
-        
-            # Create ouput directory
-            objFolderPath =  bpy.path.abspath(filepath + '/meshes/' + frameNumber + '/')
-            if not os.path.exists(objFolderPath):
-                parent.report({"INFO"},f'Meshes directory did not exist, creating: {objFolderPath}')
-                os.makedirs(objFolderPath)
+            material = object.material_slots[i].material if len(object.material_slots) != 0 else None
+            if len(object.material_slots) != 0 and material is None:
+                parent.report({'WARNING'}, f"Empty material slot on object: {object.name}, using the default material")
+                parent.error_or_warning = True
+            if material is not None and material.name not in exportedMaterials:
+                materials += export_material(parent, scene, material, filepath)
+                exportedMaterials.append(material.name)
 
-            # Compute the path variables
-            objName = object.name + f'_mat{i}.obj' 
-            objName = objName.replace(":","_")
-            objFilePath = objFolderPath + objName
-            objFilePathRel = 'meshes/' + frameNumber + '/' + objName
-
-            # Export obj manually
-            indices = []
-            normals = []
-            if os.path.exists(objFilePath) and not scene.reexport_geometry:
-                parent.report({'INFO'}, f"Skipping existing file: {objFilePath}")
-            else:
-                parent.report({'INFO'}, f"Exporting file: {objFilePath}")
-                for loop_tri in mesh.loop_triangles:
-                    polygon = mesh.polygons[loop_tri.polygon_index]
-                    if polygon.material_index == i:
-                        for loop_index in loop_tri.loops:
-                            vertex_index = mesh.loops[loop_index].vertex_index
-                            indices.append(vertex_index)
-                            normals.append(mesh.loops[loop_index].normal)
-                parent.report({'DEBUG'}, f"Exporting - Nb Tri: {len(indices) // 3}") 
-                if(len(indices) == 0):
-                    continue 
-                write_obj(objFilePath, mesh, indices, normals, i)
+            # No triangle uses this material slot
+            if exported_parts[key][i] is None:
+                continue
 
             # Create entry
             # TODO: Manage participating media
             #exportObject_medium(scene_file, object.material_slots[0].material)
             shape_data = {}
             shape_data["type"] = "mesh"
-            shape_data["filename"] = objFilePathRel
-            if len(object.material_slots) != 0:
-                shape_data["material"] = object.material_slots[i].material.name
+            shape_data["filename"] = exported_parts[key][i]
+            if material is not None:
+                shape_data["material"] = material.name
             else:
                 # Use the default material
                 shape_data["material"] = "DEFAULT"
-            
+
             matrix =  object.matrix_world # transposed()
             shape_data["transform"] = {
                 "matrix" : [
@@ -552,17 +640,21 @@ def export_integrator(parent, scene):
     return int_data
 
 def export_background(parent, scene, filepath):
+    # No world: black background
+    if scene.world is None or scene.world.node_tree is None:
+        return [0.0, 0.0, 0.0]
+
     # Fetch world
     outputNode = None
     for n in scene.world.node_tree.nodes:
         if n.type == 'OUTPUT_WORLD':
             outputNode = n
             break
-    
+
     # No connection
-    if len(outputNode.inputs[0].links) == 0:
+    if outputNode is None or len(outputNode.inputs[0].links) == 0:
         return 0.0
-    
+
     # Get the node
     node = outputNode.inputs[0].links[0].from_node
     if node.bl_idname == "ShaderNodeBackground":
@@ -604,18 +696,19 @@ def export_renderer(parent, filepath, scene , frameNumber):
     # Clear lsit of cached texture and materials
     exportedMaterials.clear()
 
-    with open(out, 'w') as scene_file:
-        data_all ={}
-        
-        data_all["background"] = export_background(parent, scene, filepath)
-        data_all["integrator"] = export_integrator(parent, scene)
-        (camera, sampler) = export_camera(parent, scene)
-        data_all["camera"] = camera
-        data_all["sampler"] = sampler
-        (shapes, materials) = export_objects(parent, filepath, scene, frameNumber)
-        data_all["materials"] = materials
-        data_all["shapes"] = shapes
+    data_all ={}
 
-        exported_json_string = json.dumps(data_all, indent=4)
-        scene_file.write(exported_json_string)
-        scene_file.close()
+    data_all["background"] = export_background(parent, scene, filepath)
+    data_all["integrator"] = export_integrator(parent, scene)
+    camera_and_sampler = export_camera(parent, scene)
+    if camera_and_sampler is None:
+        return
+    (camera, sampler) = camera_and_sampler
+    data_all["camera"] = camera
+    data_all["sampler"] = sampler
+    (shapes, materials) = export_objects(parent, filepath, scene, frameNumber)
+    data_all["materials"] = materials
+    data_all["shapes"] = shapes
+
+    with open(out, 'w') as scene_file:
+        scene_file.write(json.dumps(data_all, indent=4))
