@@ -1,7 +1,9 @@
 # MTI 870 - Blender exporter
 
 This is the experimental blender exporter for MTI 870. 
-This plugin have been only tested for Blender 3.2. More Blender version should works.
+This plugin has been tested with Blender 5.2. It requires at least Blender 4.1.
+
+Meshes are exported as binary PLY files (`meshes/<frame>/<name>_mat<i>.ply`), one per material of the object. Vertices are unique per (position, normal, UV), so the face indices can also be used as tangent indices. Objects sharing the same mesh and without modifiers reference the same file: the renderers still load one copy per object (instancing is not supported).
 
 ## Installation
 
@@ -20,9 +22,6 @@ The main steps for installing this plugin:
 6) Go to the bottom of the panel (scrolling down). Specify inside `MTI Render settings` the output directory. Press export the scene.
 
 ![Export screenshot](imgs/export.png)
-
-## Issues
-- If the output directory is not specified, the export button crashes.
 
 ## TODOs
 - Support more conversion from Cycles materials to renderer
