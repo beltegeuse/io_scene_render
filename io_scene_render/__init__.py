@@ -17,7 +17,7 @@ bl_info = {
     "name" : "io_scene_render",
     "author" : "Adrien Gruson",
     "description" : "",
-    "blender" : (2, 80, 0),
+    "blender" : (4, 1, 0),
     "location" : "",
     "warning" : "",
     "wiki_url": "",

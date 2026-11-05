@@ -7,6 +7,8 @@ import mathutils
 from mathutils import Vector
 import shutil
 import json
+import re
+import numpy as np
 
 #render engine custom begin
 class RendererRenderEngine(bpy.types.RenderEngine):
@@ -26,21 +28,22 @@ class RendererRenderEngine(bpy.types.RenderEngine):
 from bl_ui import properties_render
 from bl_ui import properties_material
 
-for member in dir(properties_render):
-    subclass = getattr(properties_render, member)
-    try:
-        subclass.COMPAT_ENGINES.add('Renderer_Renderer')
-    except:
-        pass
+def compat_engine_sets():
+    for module in (properties_render, properties_material):
+        for member in dir(module):
+            compat_engines = getattr(getattr(module, member), "COMPAT_ENGINES", None)
+            if isinstance(compat_engines, set):
+                yield compat_engines
 
-for member in dir(properties_material):
-    subclass = getattr(properties_material, member)
-    try:
-        subclass.COMPAT_ENGINES.add('Renderer_Renderer')
-    except:
-        pass
+# RendererRenderEngine itself is registered by auto_load
+def register():
+    for compat_engines in compat_engine_sets():
+        compat_engines.add('Renderer_Renderer')
 
-bpy.utils.register_class(RendererRenderEngine)
+def unregister():
+    for compat_engines in compat_engine_sets():
+        compat_engines.discard('Renderer_Renderer')
+
 exportedMaterials = list()
 
 #Camera code:
@@ -56,12 +59,12 @@ def measure(first, second):
 def export_camera(parent, scene):
     parent.report({'INFO'}, " Fetching camera..")
     cam_ob = bpy.context.scene.camera
-    if cam_ob is None:
-        parent.error({"ERROR"}, "no scene camera,aborting")
+    if cam_ob is None or cam_ob.type != 'CAMERA':
+        parent.report({'ERROR'}, "No scene camera, aborting")
         parent.error_or_warning = True
         parent.fatal_error = True
-        return {}
-    elif cam_ob.type == 'CAMERA':
+        return None
+    else:
         parent.report({'INFO'}, f"Exporting camera: {cam_ob.name} [{scene.render.resolution_x}x{scene.render.resolution_y}]")
 
         cameramatrix = cam_ob.matrix_world.copy()
@@ -81,7 +84,7 @@ def export_camera(parent, scene):
         ]
 
         # https://blender.stackexchange.com/questions/14745/how-do-i-change-the-focal-length-of-a-camera-with-python
-        fov = bpy.data.cameras[0].angle * 180 / math.pi
+        fov = cam_ob.data.angle * 180 / math.pi
         camera_dict["vfov"] = fov * (scene.resolution_y/scene.resolution_x)
         
         if scene.dofLookAt is not None:
@@ -575,6 +578,11 @@ def export_background(parent, scene, filepath):
 def export_renderer(parent, filepath, scene , frameNumber):
     if filepath == "":
         filepath = os.path.dirname(bpy.data.filepath)
+        if filepath == "":
+            parent.report({'ERROR'}, "No output directory, and the blend file is not saved: aborting")
+            parent.error_or_warning = True
+            parent.fatal_error = True
+            return
         parent.report({'WARNING'}, f"No output directory, using default: {filepath}")
     else:
         parent.report({'INFO'}, f"Exporting to: {filepath}")
