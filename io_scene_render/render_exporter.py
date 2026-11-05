@@ -394,13 +394,13 @@ def export_material(parent, scene, material, filepath):
         mats = [{"type" : "diffuse", "name" : material.name, "albedo" : [0.8, 0.8, 0.8]}]
     return mats
 
-def read_mesh_triangles(mesh, nb_parts):
+def read_mesh_triangles(mesh):
     """Read the triangle corners of an evaluated mesh as numpy arrays.
 
     Returns the loop index of each triangle corner (shape: nb_triangles x 3), the
-    part of each triangle, and the per-loop positions / normals / uvs (uvs: None if
-    the mesh has no UV layer). Adding 0.0 turns -0.0 into 0.0, so that equal values
-    have equal bytes when welding the vertices.
+    material index of each triangle, and the per-loop positions / normals / uvs (uvs:
+    None if the mesh has no UV layer). Adding 0.0 turns -0.0 into 0.0, so that equal
+    values have equal bytes when welding the vertices.
     """
     nb_triangles = len(mesh.loop_triangles)
     triangle_loops = np.empty(nb_triangles * 3, dtype=np.int32)
@@ -426,11 +426,22 @@ def read_mesh_triangles(mesh, nb_parts):
         uv_layer.uv.foreach_get("vector", uvs)
         uvs = uvs.reshape(-1, 2) + 0.0
 
-    # Like Blender, an out of range material index uses the last material
-    triangle_parts = np.clip(triangle_materials, 0, nb_parts - 1)
-    return triangle_loops.reshape(-1, 3), triangle_parts, positions, normals, uvs
+    return triangle_loops.reshape(-1, 3), triangle_materials, positions, normals, uvs
 
-def write_ply(filepath, triangle_loops, positions, normals, uvs):
+def read_ply_source(filepath):
+    """Return the source recorded by write_ply in a PLY header (None if there is none)."""
+    try:
+        with open(filepath, "rb") as ply:
+            for line in ply:
+                if line.startswith(b"comment source "):
+                    return line[len(b"comment source "):].rstrip().decode("ascii", "replace")
+                if line.startswith(b"end_header"):
+                    return None
+    except OSError:
+        pass
+    return None
+
+def write_ply(filepath, source, triangle_loops, positions, normals, uvs):
     """Write triangles as a binary PLY with welded vertices.
 
     A vertex is unique per (position, normal, uv). The renderers rely on it: they use
@@ -465,6 +476,7 @@ def write_ply(filepath, triangle_loops, positions, normals, uvs):
         "ply\n"
         "format binary_little_endian 1.0\n"
         "comment Created by io_scene_render\n"
+        f"comment source {source}\n"
         f"element vertex {len(vertices)}\n"
         "property float x\nproperty float y\nproperty float z\n"
         "property float nx\nproperty float ny\nproperty float nz\n"
@@ -478,8 +490,11 @@ def write_ply(filepath, triangle_loops, positions, normals, uvs):
         vertices.tofile(out)
         faces.tofile(out)
 
-def export_mesh_parts(parent, scene, depsgraph, object, nb_parts, folder, relative_folder, stem):
+def export_mesh_parts(parent, scene, eval_obj, source, nb_parts, folder, relative_folder, stem):
     """Write one PLY per material slot of the object.
+
+    The file names depend on the other meshes of the scene: an existing file is only
+    reused when it was written from the same source.
 
     Returns the relative path of each part (None when no triangle uses the slot).
     """
@@ -487,7 +502,7 @@ def export_mesh_parts(parent, scene, depsgraph, object, nb_parts, folder, relati
     todo = []
     results = [None] * nb_parts
     for i, name in enumerate(names):
-        if os.path.exists(folder + name) and not scene.reexport_geometry:
+        if not scene.reexport_geometry and read_ply_source(folder + name) == source:
             parent.report({'INFO'}, f"Skipping existing file: {folder + name}")
             results[i] = relative_folder + name
         else:
@@ -495,16 +510,20 @@ def export_mesh_parts(parent, scene, depsgraph, object, nb_parts, folder, relati
     if len(todo) == 0:
         return results
 
-    eval_obj = object.evaluated_get(depsgraph)
     mesh = eval_obj.to_mesh()
     try:
-        triangle_loops, triangle_parts, positions, normals, uvs = read_mesh_triangles(mesh, nb_parts)
+        triangle_loops, triangle_materials, positions, normals, uvs = read_mesh_triangles(mesh)
+        # Like Blender, an out of range material index uses the last material
+        if len(eval_obj.material_slots) != 0 and len(triangle_materials) != 0 and triangle_materials.max() >= nb_parts:
+            parent.report({'WARNING'}, f"Material index out of range on object: {eval_obj.name}, using its last material")
+            parent.error_or_warning = True
+        triangle_parts = np.clip(triangle_materials, 0, nb_parts - 1)
         for i in todo:
             part_loops = triangle_loops[triangle_parts == i]
             if len(part_loops) == 0:
                 continue
             parent.report({'INFO'}, f"Exporting file: {folder + names[i]} - Nb Tri: {len(part_loops)}")
-            write_ply(folder + names[i], part_loops, positions, normals, uvs)
+            write_ply(folder + names[i], source, part_loops, positions, normals, uvs)
             results[i] = relative_folder + names[i]
     finally:
         eval_obj.to_mesh_clear()
@@ -515,11 +534,15 @@ def can_share_mesh(object):
     return len(object.modifiers) == 0 and not object.show_only_shape_key
 
 def unique_file_stem(stem, key, used_stems):
-    """Make a mesh name usable as a file name, without clash with another mesh."""
+    """Make a mesh name usable as a file name, without clash with another mesh.
+
+    Names are compared without case: "Wall" and "wall" are the same file on Windows
+    and on the default macOS file system.
+    """
     stem = re.sub(r'[<>:"/\\|?*]', "_", stem)
     candidate = stem
     suffix = 1
-    while used_stems.setdefault(candidate, key) != key:
+    while used_stems.setdefault(candidate.casefold(), key) != key:
         candidate = f"{stem}_{suffix}"
         suffix += 1
     return candidate
@@ -569,24 +592,32 @@ def export_objects(parent, filepath, scene, frameNumber):
         parent.report({'INFO'}, f"Exporting Object: {object.name}")
         wm.progress_update(j)
 
+        # The evaluated slots also hold the materials added by Geometry Nodes
+        eval_obj = object.evaluated_get(depsgraph)
+        material_slots = eval_obj.material_slots
+
         # Export the geometry, once per mesh when the objects can share it
-        nb_parts = max(len(object.material_slots), 1)
+        nb_parts = max(len(material_slots), 1)
         if can_share_mesh(object):
             key = (object.data.as_pointer(), nb_parts)
             stem = object.data.name if object.data.users > 1 else object.name
+            source = json.dumps("mesh:" + object.data.name_full)
         else:
             key = (object.as_pointer(), nb_parts)
             stem = object.name
+            source = json.dumps("object:" + object.name_full)
         if key not in exported_parts:
             stem = unique_file_stem(stem, key, used_stems)
-            exported_parts[key] = export_mesh_parts(parent, scene, depsgraph, object, nb_parts, meshFolderPath, relative_folder, stem)
+            exported_parts[key] = export_mesh_parts(parent, scene, eval_obj, source, nb_parts, meshFolderPath, relative_folder, stem)
         else:
             parent.report({'INFO'}, f"Reusing the files of mesh: {object.data.name}")
 
         for i in range(nb_parts):
             # Export the material if needed
-            material = object.material_slots[i].material if len(object.material_slots) != 0 else None
-            if len(object.material_slots) != 0 and material is None:
+            material = material_slots[i].material if len(material_slots) != 0 else None
+            if material is not None:
+                material = material.original
+            if len(material_slots) != 0 and material is None:
                 parent.report({'WARNING'}, f"Empty material slot on object: {object.name}, using the default material")
                 parent.error_or_warning = True
             if material is not None and material.name not in exportedMaterials:
