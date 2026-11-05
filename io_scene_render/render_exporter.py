@@ -151,7 +151,7 @@ def only_value (parent, inputSlot):
     parent.error_or_warning = True
     return [0.0, 0.0, 0.0]
 
-def texture_or_value (parent, inputSlot, filepath, scale=1.0, is_normal_map = False):
+def texture_or_value (parent, inputSlot, filepath, scale=1.0, is_normal_map = False, is_data = False):
     """Return BSDF information"""
     if(len(inputSlot.links) == 0):
         if type(inputSlot.default_value) == float:
@@ -220,7 +220,7 @@ def texture_or_value (parent, inputSlot, filepath, scale=1.0, is_normal_map = Fa
                 # "translate" : translate,
                 # "rotation" : rot_angles,
                 # "rotationDegree" : rot_anglesDegree,
-                "gamma" : not is_normal_map,
+                "gamma" : not (is_normal_map or is_data),
                 "scale" : scale
             }
         else:
@@ -228,7 +228,7 @@ def texture_or_value (parent, inputSlot, filepath, scale=1.0, is_normal_map = Fa
             return {
                 "type" : "texture",
                 "filename" : "textures/"+filename,
-                "gamma" : not is_normal_map,
+                "gamma" : not (is_normal_map or is_data),
                 "scale" : scale
             }
     else:
@@ -270,7 +270,7 @@ def export_material_node(parent, scene, mat, materialName, filepath):
             mat_data["eta"] = texture_or_value(parent, fresnel_node.inputs[0], filepath)
         else:
             mat_data["type"] = "blend"
-            mat_data["alpha"] = texture_or_value(parent, mat.inputs[0], filepath)
+            mat_data["alpha"] = texture_or_value(parent, mat.inputs[0], filepath, is_data = True)
         mat_data["matA"] = export_material_node(parent, scene, mat.inputs[2].links[0].from_node, materialName, filepath)
         mat_data["matB"] = export_material_node(parent, scene, mat.inputs[1].links[0].from_node, materialName, filepath)
     elif mat.bl_idname == "ShaderNodeBsdfGlass":
@@ -326,7 +326,7 @@ def export_material_node(parent, scene, mat, materialName, filepath):
             #     parent.report({'INFO'}, f" Principled input: {input.name} | default: {input.default_value} | links: {len(input.links)}")
             local_material["type"] = "blend"
             base_color = texture_or_value(parent, mat.inputs["Base Color"], filepath)
-            local_material["alpha"] = texture_or_value(parent, mat.inputs["Metallic"], filepath)
+            local_material["alpha"] = texture_or_value(parent, mat.inputs["Metallic"], filepath, is_data = True)
             local_material["matA"] = {
                 "type" : "metal",
                 "ks" : base_color,
